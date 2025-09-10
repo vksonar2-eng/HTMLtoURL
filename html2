@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="mr">
+<head>
+  <meta charset="UTF-8">
+  <title>S.S.P.D Thepade School Mhasawad - Attendance</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px; }
+    h1 { text-align: center; color: darkblue; }
+    .box { background: white; padding: 15px; margin-bottom: 20px; border-radius: 10px; box-shadow: 0 0 5px gray; }
+    label { display: block; margin-top: 8px; }
+    input, select, button, textarea { margin-top: 5px; padding: 5px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border: 1px solid gray; padding: 8px; text-align: center; }
+    th { background: #ddd; }
+    #mainContent { display: none; }
+  </style>
+</head>
+<body>
+  <!-- Login Box -->
+  <div id="loginBox" class="box">
+    <h2>Login Required</h2>
+    <label>Username:</label>
+    <input type="text" id="username">
+    <label>Password:</label>
+    <input type="password" id="password">
+    <button onclick="checkLogin()">Login</button>
+    <p id="loginMessage" style="color:red;"></p>
+  </div>
+
+  <!-- Main Content -->
+  <div id="mainContent">
+    <h1>S.S.P.D Thepade School Mhasawad</h1>
+
+    <!-- Add Student -->
+    <div class="box">
+      <h2>विद्यार्थी Add करा</h2>
+      <label>रोल नंबर:</label>
+      <input type="number" id="studentRoll" value="1">
+      <label>नाव:</label>
+      <input type="text" id="studentName">
+      <button onclick="addStudent()">Add</button>
+    </div>
+
+    <!-- Bulk Add Students -->
+    <div class="box">
+      <h2>Bulk Students Add करा</h2>
+      <p>Excel/CSV File Upload करा (Roll No, Name):</p>
+      <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
+      <button onclick="uploadExcel()">Upload</button>
+      <br><br>
+      <p>किंवा Manual Add करा:</p>
+      <textarea id="bulkInput" rows="6" cols="40" placeholder="उदा:\n1, राम पाटील\n2, सीता शिंदे"></textarea><br>
+      <button onclick="bulkAddStudents()">Bulk Add</button>
+    </div>
+
+    <!-- Attendance Section -->
+    <div class="box">
+      <h2>Present / Absent Mark करा</h2>
+      <label>तारीख:</label>
+      <input type="date" id="dateInput" value="">
+      <br><br>
+      <label>रोल नंबर:</label>
+      <input type="number" id="rollInput" oninput="displayStudent()" onkeydown="nextRoll(event)">
+      <span id="studentDisplay"></span>
+      <br><br>
+      <label><input type="radio" name="status" value="Present"> Present</label>
+      <label><input type="radio" name="status" value="Absent"> Absent</label>
+      <br>
+      <button onclick="markAttendance()">➕ Add</button>
+      <button onclick="finishAttendance()">✅ Finish Attendance</button>
+      <p id="attendanceMsg" style="color:green; font-weight:bold;"></p>
+    </div>
+
+    <!-- Attendance Database -->
+    <div class="box">
+      <h2>आजचा Attendance</h2>
+      <button onclick="downloadExcel()">⬇️ Download Excel</button>
+      <table id="attendanceTable">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Roll No</th>
+            <th>Name</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <!-- History Section -->
+    <div class="box">
+      <h2>History पाहा</h2>
+      <label>Roll No:</label>
+      <input type="number" id="historyRoll">
+      <button onclick="showHistory()">Show History</button>
+      <table id="historyTable">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <p id="scoreCount"></p>
+    </div>
+  </div>
+
+  <script>
+    let students = [];
+    let attendance = {};
+
+    // Save / Load
+    function saveData() {
+      localStorage.setItem("students", JSON.stringify(students));
+      localStorage.setItem("attendance", JSON.stringify(attendance));
+    }
+    function loadData() {
+      let s = localStorage.getItem("students");
+      let a = localStorage.getItem("attendance");
+      if(s) students = JSON.parse(s);
+      if(a) attendance = JSON.parse(a);
+    }
+
+    // Login
+    function checkLogin() {
+      let user = document.getElementById("username").value;
+      let pass = document.getElementById("password").value;
+      if(user === "VALMIK@8B" && pass === "VK131982@") {
+        document.getElementById("loginBox").style.display = "none";
+        document.getElementById("mainContent").style.display = "block";
+        autoMarkAbsent();
+      } else {
+        document.getElementById("loginMessage").innerText = "❌ Wrong Username or Password!";
+      }
+    }
+
+    // Add single student
+    function addStudent() {
+      let roll = parseInt(document.getElementById("studentRoll").value);
+      let name = document.getElementById("studentName").value.trim();
+      if(!name) return alert("नाव टाका");
+      if(students.find(s => s.roll === roll)) return alert("हा रोल नंबर आधीच वापरला आहे");
+
+      students.push({ roll, name });
+      saveData();
+
+      document.getElementById("studentRoll").value = roll + 1;
+      document.getElementById("studentName").value = "";
+      alert("विद्यार्थी Add झाला");
+    }
+
+    // Bulk Add (Manual)
+    function bulkAddStudents() {
+      let data = document.getElementById("bulkInput").value.trim();
+      if(!data) return alert("विद्यार्थ्यांची यादी टाका");
+
+      let lines = data.split("\n");
+      lines.forEach(line => {
+        let parts = line.split(",");
+        if(parts.length >= 2) {
+          let roll = parseInt(parts[0].trim());
+          let name = parts[1].trim();
+          if(!roll || !name) return;
+          if(students.find(s => s.roll === roll)) return;
+          students.push({ roll, name });
+        }
+      });
+
+      saveData();
+      document.getElementById("bulkInput").value = "";
+      alert("Bulk Students Add झाले ✅");
+    }
+
+    // Bulk Add (Excel Upload)
+    function uploadExcel() {
+      let file = document.getElementById("fileInput").files[0];
+      if(!file) return alert("कृपया Excel/CSV फाईल निवडा");
+
+      let reader = new FileReader();
+      reader.onload = function(e) {
+        let data = new Uint8Array(e.target.result);
+        let workbook = XLSX.read(data, { type: 'array' });
+        let sheet = workbook.Sheets[workbook.SheetNames[0]];
+        let rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+        rows.forEach((row, i) => {
+          if(i === 0) return; // header skip
+          let roll = parseInt(row[0]);
+          let name = row[1];
+          if(!roll || !name) return;
+          if(students.find(s => s.roll === roll)) return;
+          students.push({ roll, name });
+        });
+
+        saveData();
+        alert("Excel मधून विद्यार्थी Add झाले ✅");
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    // Attendance functions
+    function nextRoll(event) {
+      if(event.key === "Enter") {
+        markAttendance();
+        let rollBox = document.getElementById("rollInput");
+        rollBox.value = parseInt(rollBox.value || 0) + 1;
+        displayStudent();
+      }
+    }
+
+    function displayStudent() {
+      let roll = parseInt(document.getElementById("rollInput").value);
+      let student = students.find(s => s.roll === roll);
+      if(student) {
+        document.getElementById("studentDisplay").innerText = "नाव: " + student.name;
+      } else {
+        document.getElementById("studentDisplay").innerText = "";
+      }
+    }
+
+    function markAttendance() {
+      let roll = parseInt(document.getElementById("rollInput").value);
+      let student = students.find(s => s.roll === roll);
+      if(!student) return alert("Roll no चुकीचा आहे");
+
+      let status = document.querySelector('input[name="status"]:checked');
+      if(!status) return alert("Present/Absent निवडा");
+
+      let date = document.getElementById("dateInput").value || new Date().toLocaleDateString();
+      if(!attendance[date]) attendance[date] = [];
+
+      if(attendance[date].find(r => r.roll === roll)) {
+        alert("या विद्यार्थ्याचा Attendance आधीच घेतला आहे");
+        return;
+      }
+
+      attendance[date].push({ roll, name: student.name, status: status.value });
+      saveData();
+
+      let row = document.createElement("tr");
+      row.innerHTML = `<td>${date}</td><td>${roll}</td><td>${student.name}</td><td>${status.value}</td>`;
+      document.querySelector("#attendanceTable tbody").appendChild(row);
+
+      document.querySelectorAll('input[name="status"]').forEach(el => el.checked = false);
+
+      document.getElementById("attendanceMsg").innerText = "✅ Attendance Added!";
+      setTimeout(() => { document.getElementById("attendanceMsg").innerText = ""; }, 2000);
+    }
+
+    function finishAttendance() {
+      let date = document.getElementById("dateInput").value || new Date().toLocaleDateString();
+      if(!attendance[date]) attendance[date] = [];
+
+      students.forEach(st => {
+        let already = attendance[date].find(r => r.roll === st.roll);
+        if(!already) {
+          attendance[date].push({ roll: st.roll, name: st.name, status: "Absent" });
+
+          let row = document.createElement("tr");
+          row.innerHTML = `<td>${date}</td><td>${st.roll}</td><td>${st.name}</td><td>Absent</td>`;
+          document.querySelector("#attendanceTable tbody").appendChild(row);
+        }
+      });
+
+      saveData();
+
+      document.getElementById("attendanceMsg").innerText = "✅ Finish Attendance Complete (बाकी सर्व Absent झाले)";
+      setTimeout(() => { document.getElementById("attendanceMsg").innerText = ""; }, 3000);
+    }
+
+    // Auto mark absent for missing students on login
+    function autoMarkAbsent() {
+      finishAttendance(); // Auto mark all unmarked students as Absent
+    }
+
+    // History
+    function showHistory() {
+      let roll = parseInt(document.getElementById("historyRoll").value);
+      let tableBody = document.querySelector("#historyTable tbody");
+      tableBody.innerHTML = "";
+      let present = 0, absent = 0;
+      for(let date in attendance) {
+        attendance[date].forEach(record => {
+          if(record.roll === roll) {
+            let row = document.createElement("tr");
+            row.innerHTML = `<td>${date}</td><td>${record.status}</td>`;
+            tableBody.appendChild(row);
+            if(record.status === "Present") present++;
+            else absent++;
+          }
+        });
+      }
+      document.getElementById("scoreCount").innerText = 
+        `एकूण Present: ${present}, Absent: ${absent}`;
+    }
+
+    // Download Attendance Excel
+    function downloadExcel() {
+      let rows = [["Date", "Roll No", "Name", "Status"]];
+      for(let date in attendance) {
+        attendance[date].forEach(r => {
+          rows.push([date, r.roll, r.name, r.status]);
+        });
+      }
+      let ws = XLSX.utils.aoa_to_sheet(rows);
+      let wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Attendance");
+      XLSX.writeFile(wb, "attendance.xlsx");
+    }
+
+    window.onload = function() {
+      loadData();
+      let today = new Date().toISOString().split("T")[0];
+      document.getElementById("dateInput").value = today;
+    }
+  </script>
+</body>
+</html>
